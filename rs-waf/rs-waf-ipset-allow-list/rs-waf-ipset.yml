@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates Refactor Spaces and WAF resources
+Parameters:
+  NetworkFabricType: #Parameter to select if a network bridge (Transit Gateway) is provisioned when creating the Refactor Spaces environment.
+    Type: String
+    AllowedValues:
+      - NONE
+      - TRANSIT_GATEWAY
+    Description: Select if you would like Refactor Spaces to provision a network bridge (Transit Gateway) to establish cross-account/VPC network connectivity.  If NONE is selected, you must provide your own network bridge.
+    Default: NONE
+Resources:
+  VPC: # Creates a VPC.  This will serve as the proxy VPC for the Refactor Spaces application.
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.2.0.0/16
+      Tags:
+        - Key: Name
+          Value: VpcForRefactorSpacesProxy
+  PrivateSubnet1: # Creates a subnet in the VPC
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      CidrBlock: 10.2.1.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Refactor Spaces Private Subnet (AZ1)
+  PrivateSubnet2: # Creates a subnet in the VPC
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: 10.2.2.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Refactor Spaces Private Subnet (AZ2)
+  PrivateSubnet3: # Creates a subnet in the VPC
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 2, !GetAZs  '' ]
+      CidrBlock: 10.2.3.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Refactor Spaces Private Subnet (AZ3)
+  RefactorSpacesTestEnvironment: # Creates a Refactor Spaces environment
+    Type: AWS::RefactorSpaces::Environment
+    DeletionPolicy: Delete
+    Properties:
+      Name: TestEnvironment
+      NetworkFabricType: !Ref NetworkFabricType
+      Description: "This is a test environment"
+  TestApplication: # Creates a Refactor Spaces application - regional proxy type - uses the VPC created above for the proxy VPC
+    Type: AWS::RefactorSpaces::Application
+    DeletionPolicy: Delete
+    DependsOn:
+      - PrivateSubnet1
+      - PrivateSubnet2
+      - PrivateSubnet3
+    Properties:
+      Name: TestApplication
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      VpcId: !Ref VPC
+      ProxyType: API_GATEWAY
+      ApiGatewayProxy:
+        EndpointType: "REGIONAL" #Change to PRIVATE if you would like a private API endpoint
+        StageName: "test"
+  MonolithService: # Creates a service (Monolith) in the Refactor Spaces application
+    Type: AWS::RefactorSpaces::Service
+    DeletionPolicy: Delete
+    Properties:
+      Name: Monolith
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      EndpointType: URL
+      VpcId: !Ref VPC
+      UrlEndpoint:
+        Url: "http://aws.amazon.com"
+  RefactorSpacesDefaultRoute: # Creates a default route (/) to the Monolith service endpoint
+    Type: AWS::RefactorSpaces::Route
+    Properties:
+      RouteType: "DEFAULT"
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      ServiceIdentifier: !GetAtt MonolithService.ServiceIdentifier
+      DefaultRoute:
+        ActivationState: ACTIVE
+  Microservice1Service: # Creates a service (Microservice1) in the Refactor Spaces application
+    Type: AWS::RefactorSpaces::Service
+    DependsOn: 'RefactorSpacesDefaultRoute'
+    DeletionPolicy: Delete
+    Properties:
+      Name: Microservice1
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      EndpointType: URL
+      VpcId: !Ref VPC
+      UrlEndpoint:
+        Url: "https://www.amazon.com"
+  RefactorSpacesRoutetoMicroservice1: # Creates a route (/microservice1) to Microservice1
+    Type: AWS::RefactorSpaces::Route
+    DependsOn: 'Microservice1Service'
+    Properties:
+      RouteType: "URI_PATH"
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      ServiceIdentifier: !GetAtt Microservice1Service.ServiceIdentifier
+      UriPathRoute:
+        SourcePath: "/microservice1"
+        ActivationState: ACTIVE
+        Methods: [ "GET" ]
+  AllowIPSet: # Creates an IP Set in AWS WAF
+    Type: 'AWS::WAFv2::IPSet'
+    Properties:
+      Name: My-IP-addresses
+      Description: My IP addresses
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses:
+        - 192.168.2.10/32
+        - 192.168.3.10/32
+  WebACL1: # Creates a Web ACL in AWS WAF.  The Web ACL has a rule which allows traffic from the IP Set created above.  All other traffic is blocked.
+    Type: 'AWS::WAFv2::WebACL'
+    Properties:
+      Name: WebACLForRS
+      Scope: REGIONAL
+      Description: WebACL for RS API
+      DefaultAction:
+        Block: {}  #Default behavior is to block
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: WebACLforRSMetric
+      Rules:
+        - Name: Allow-My-IP-Addresses
+          Priority: 1
+          Action:
+            Allow: {}  #Only allow from IP Set IP addresses
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: IPSetWithExceptionMetric
+          Statement:
+            IPSetReferenceStatement:
+              Arn: !GetAtt AllowIPSet.Arn
+  TestWebACLAssociationForCFN: # Associates the Web ACL created above with API and stage created by Refactor Spaces.
+    Type: 'AWS::WAFv2::WebACLAssociation'
+    DependsOn: 'RefactorSpacesDefaultRoute'
+    Properties:
+      ResourceArn: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${TestApplication.ApiGatewayId}/stages/${TestApplication.StageName}"
+      WebACLArn: !GetAtt WebACL1.Arn
+  
