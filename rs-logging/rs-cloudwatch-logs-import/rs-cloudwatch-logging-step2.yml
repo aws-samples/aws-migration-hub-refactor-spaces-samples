@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates Refactor Spaces resources and sets up CloudWatch logging for the API 
+Parameters:
+  NetworkFabricType: # Parameter to select if a network bridge (Transit Gateway) is provisioned when creating the Refactor Spaces environment.
+    Type: String
+    AllowedValues:
+      - NONE
+      - TRANSIT_GATEWAY
+    Description: Select if you would like Refactor Spaces to provision a network bridge (Transit Gateway) to establish cross-account/VPC network connectivity.  If NONE is selected, you must provide your own network bridge.
+    Default: NONE
+Resources:
+  VPC: # Creates a VPC.  This will serve as the proxy VPC for the Refactor Spaces application.
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.2.0.0/16
+      Tags:
+        - Key: Name
+          Value: VpcForRefactorSpaces
+  PrivateSubnet1: # Creates a subnet in the VPC
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      CidrBlock: 10.2.1.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Refactor Spaces Private Subnet (AZ1)
+  PrivateSubnet2: # Creates a subnet in the VPC
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: 10.2.2.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Refactor Spaces Private Subnet (AZ2)
+  PrivateSubnet3: # Creates a subnet in the VPC
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 2, !GetAZs  '' ]
+      CidrBlock: 10.2.3.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Refactor Spaces Private Subnet (AZ3)
+  RefactorSpacesTestEnvironment: # Creates a Refactor Spaces environment
+    Type: AWS::RefactorSpaces::Environment
+    DeletionPolicy: Delete
+    Properties:
+      Name: Environment1
+      NetworkFabricType: !Ref NetworkFabricType
+      Description: "This is a test environment"
+  TestApplication: # Creates a Refactor Spaces application - regional proxy type - uses the VPC created above for the proxy VPC
+    Type: AWS::RefactorSpaces::Application
+    DeletionPolicy: Delete
+    DependsOn:
+      - PrivateSubnet1
+      - PrivateSubnet2
+      - PrivateSubnet3
+    Properties:
+      Name: proxytest
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      VpcId: !Ref VPC
+      ProxyType: API_GATEWAY
+      ApiGatewayProxy:
+        EndpointType: "REGIONAL" # Change to PRIVATE if you would like a private API endpoint
+        StageName: "admintest"
+  MonolithService: # Creates a service for the monolith
+    Type: AWS::RefactorSpaces::Service
+    DeletionPolicy: Delete
+    Properties:
+      Name: Monolith
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      EndpointType: URL
+      VpcId: !Ref VPC
+      UrlEndpoint:
+        Url: "http://aws.amazon.com"
+  RefactorSpacesDefaultRoute: # Creates a default route to the monolith service
+    Type: AWS::RefactorSpaces::Route
+    Properties:
+      RouteType: "DEFAULT"
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      ServiceIdentifier: !GetAtt MonolithService.ServiceIdentifier
+      DefaultRoute:
+        ActivationState: ACTIVE
+  Microservice1Service: # Creates a service for the first microservice
+    DependsOn: 'RefactorSpacesDefaultRoute'
+    Type: AWS::RefactorSpaces::Service
+    DeletionPolicy: Delete
+    Properties:
+      Name: Microservice1
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      EndpointType: URL
+      VpcId: !Ref VPC
+      UrlEndpoint:
+        Url: "https://advertising.amazon.com"
+  RefactorSpacesRoute1: # Creates a route to the Microservice1 service
+    Type: AWS::RefactorSpaces::Route
+    Properties:
+      RouteType: "URI_PATH"
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      ServiceIdentifier: !GetAtt Microservice1Service.ServiceIdentifier
+      UriPathRoute:
+        SourcePath: "/microservice1"
+        ActivationState: ACTIVE
+        Methods: [ "GET" ]
+  CloudWatchLogsRoleForAPI: # Creates an IAM role which grants API Gateway permission to read and write logs to CloudWatch for your account
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: API-Role-For-Logging-To-CloudWatch
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+  SetRoleforAPICloudWatchLogs: # Specifies the IAM role (created above) that API Gateway will use to write API logs to CloudWatch Logs
+    Type: 'AWS::ApiGateway::Account'
+    DependsOn: 'CloudWatchLogsRoleForAPI'
+    Properties:
+      CloudWatchRoleArn: !GetAtt 
+        - CloudWatchLogsRoleForAPI
+        - Arn 
+  CloudWatchLogsLogGroup: # Creates Log Group for CloudWatch API Access Logs
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: myapiaccesslogs
+  APIStagePostConfig: # Configure the Stage Properties (such as logging) on the API Created by Refactor Spaces
+    Type: AWS::ApiGateway::Stage
+    DeletionPolicy: Delete
+    Properties:
+      RestApiId: !GetAtt TestApplication.ApiGatewayId
+      StageName: !GetAtt TestApplication.StageName
+      MethodSettings:
+       - LoggingLevel: 'INFO' # Specifies the logging level.  Possible values: OFF, ERROR, or INFO
+         HttpMethod: '*'
+         ResourcePath: '/*'
+         MetricsEnabled: 'True' # Enable Detailed CloudWatch Metrics
+      AccessLogSetting:
+        DestinationArn: !GetAtt CloudWatchLogsLogGroup.Arn
+        Format: '{ "requestId":"$context.requestId", "ip": "$context.identity.sourceIp", "user": "$context.identity.user", "method": "$context.httpMethod", "path": "$context.resourcePath", "status": "$context.status", "latency": "$context.latency", "integrationError": "$context.integrationErrorMessage" }'
+Outputs:
+  apiID:
+    Description: The ID of the API created by Refactor Spaces
+    Value: !GetAtt TestApplication.ApiGatewayId
+  apiStageName:
+    Description: The name of the API stage created by Refactor Spaces
+    Value: !GetAtt TestApplication.StageName
+  

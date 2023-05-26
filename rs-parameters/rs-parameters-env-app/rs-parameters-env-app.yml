@@ -1,0 +1,47 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates a Refactor Spaces environment and application.
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedPattern: "^[A-Za-z0-9- ]+$"
+    Description: Name your Refactor Spaces environment.
+  ApplicationName:
+    Type: String
+    AllowedPattern: "^[A-Za-z0-9- ]+$"
+    Description: Name your Refactor Spaces application.
+  NetworkFabricType:
+    Type: String
+    AllowedValues:
+      - NONE
+      - TRANSIT_GATEWAY
+    Description: Select if you want Refactor Spaces to provision a network bridge (Transit Gateway) to establish cross account/VPC network connectivity.
+    Default: NONE
+  ProxyVPC:
+    Type: AWS::EC2::VPC::Id
+    Description: Select a proxy VPC.  The VPC must contain at least one subnet.  The application's proxy VPC is used to route traffic from the proxy to Refactor Spaces services with URL endpoints.
+  ProxyEndpointType:
+    Type: String
+    AllowedValues:
+      - REGIONAL
+      - PRIVATE
+    Description: Select if you want your API to be public (REGIONAL) or private (PRIVATE).
+    Default: REGIONAL
+Resources:
+  RefactorSpacesEnvironment:
+    Type: AWS::RefactorSpaces::Environment
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Ref EnvironmentName
+      NetworkFabricType: !Ref NetworkFabricType
+      Description: "This is a test environment"
+  TestApplication:
+    Type: AWS::RefactorSpaces::Application
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Ref ApplicationName
+      EnvironmentIdentifier: !Ref RefactorSpacesEnvironment
+      VpcId: !Ref ProxyVPC
+      ProxyType: API_GATEWAY
+      ApiGatewayProxy:
+        EndpointType: !Ref ProxyEndpointType
+        StageName: "test"

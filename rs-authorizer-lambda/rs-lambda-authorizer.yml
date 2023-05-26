@@ -1,0 +1,219 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This creates resources in one account.
+Parameters:
+  NetworkFabricType:
+    Type: String
+    AllowedValues:
+      - NONE
+      - TRANSIT_GATEWAY
+    Description: Select if you want Refactor Spaces to provision a network bridge (Transit Gateway) to establish cross account/VPC network connectivity.
+    Default: NONE
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.2.0.0/16
+      Tags:
+        - Key: Name
+          Value: VpcForRefactorSpaces
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      CidrBlock: 10.2.1.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Refactor Spaces Private Subnet (AZ1)
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: 10.2.2.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Refactor Spaces Private Subnet (AZ2)
+  PrivateSubnet3: # Creates a subnet in the VPC
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [ 2, !GetAZs  '' ]
+      CidrBlock: 10.2.3.0/24
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Refactor Spaces Private Subnet (AZ3)
+  RefactorSpacesTestEnvironment:
+    Type: AWS::RefactorSpaces::Environment
+    DeletionPolicy: Delete
+    Properties:
+      Name: EnvWithMultiAccountServices
+      NetworkFabricType: !Ref NetworkFabricType
+      Description: "This is a test environment"
+  TestApplication:
+    Type: AWS::RefactorSpaces::Application
+    DeletionPolicy: Delete
+    DependsOn:
+      - PrivateSubnet1
+      - PrivateSubnet2
+      - PrivateSubnet3
+    Properties:
+      Name: proxytest
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      VpcId: !Ref VPC
+      ProxyType: API_GATEWAY
+      ApiGatewayProxy:
+        EndpointType: "REGIONAL"
+        StageName: "admintest"
+  AdminAccountService:
+    Type: AWS::RefactorSpaces::Service
+    DeletionPolicy: Delete
+    Properties:
+      Name: AdminAccountService
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      EndpointType: URL
+      VpcId: !Ref VPC
+      UrlEndpoint:
+        Url: "http://aws.amazon.com"
+  RefactorSpacesDefaultRoute:
+    Type: AWS::RefactorSpaces::Route
+    DependsOn: 'apiAuth'
+    Properties:
+      RouteType: "DEFAULT"
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      ServiceIdentifier: !GetAtt AdminAccountService.ServiceIdentifier
+      DefaultRoute:
+        ActivationState: ACTIVE
+  RefactorSpacesURIRoute:
+    Type: AWS::RefactorSpaces::Route
+    DependsOn: 'RefactorSpacesDefaultRoute'
+    Properties:
+      RouteType: "URI_PATH"
+      EnvironmentIdentifier: !Ref RefactorSpacesTestEnvironment
+      ApplicationIdentifier: !GetAtt TestApplication.ApplicationIdentifier
+      ServiceIdentifier: !GetAtt AdminAccountService.ServiceIdentifier
+      UriPathRoute:
+        SourcePath: "/cfn-created-route"
+        ActivationState: ACTIVE
+        Methods: [ "GET" ]
+  apiAuth:
+    Type: AWS::ApiGateway::Authorizer
+    Properties: 
+        Name: createAuthForRS
+        RestApiId: !GetAtt TestApplication.ApiGatewayId
+        Type: TOKEN 
+        AuthorizerUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaAuthorizer.Arn}/invocations
+        IdentitySource: method.request.header.Auth
+  CustomResourceEnableAuthorizer: # Custom resource to require authorizer
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: 'apiAuth'
+    Properties:
+      ServiceToken: !GetAtt MyLambdaFunction.Arn
+      RestApiId: !GetAtt TestApplication.ApiGatewayId
+      StageName: !GetAtt TestApplication.StageName
+      AuthId: !Ref apiAuth
+  MyLambdaFunction: #Enables Lambda authorizer for all resources and methods, then creates a new deployment for these changes to take effect.
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          import botocore.exceptions
+      
+          def lambda_handler(event, context):
+            api_gateway = boto3.client('apigateway')
+            authorizer_id = event['ResourceProperties']['AuthId']
+            rest_api_id = event['ResourceProperties']['RestApiId']
+            stage_name = event['ResourceProperties']['StageName']
+    
+            try:
+                # Retrieve all resources for the given RestApiId
+                resources = api_gateway.get_resources(restApiId=rest_api_id)['items']
+          
+                # Loop through each resource and method and add the authorizer
+                for resource in resources:
+                    resource_id = resource['id']
+                    methods = api_gateway.get_resource(restApiId=rest_api_id, resourceId=resource_id)['resourceMethods']
+                    for method in methods:
+                        http_method = method.upper()
+                        api_gateway.update_method(restApiId=rest_api_id, resourceId=resource_id, httpMethod=http_method,
+                                                  patchOperations=[
+                                                    {'op': 'replace', 'path': '/authorizerId', 'value': authorizer_id},
+                                                    {'op': 'replace', 'path': '/authorizationType', 'value': 'CUSTOM'}
+                                                    ])
+
+                        print(f"Updated authorization type and authorizer ID for {http_method} {resource['path']}")
+                                                    
+                # Create new deployment for changes to take effect
+                response = api_gateway.create_deployment(restApiId=rest_api_id, stageName=stage_name)
+                deployment_id = response['id']
+                print(f"New deployment created with ID: {deployment_id}")
+
+            except botocore.exceptions.ClientError as e:
+                print(e.response['Error']['Message'])
+                cfnresponse.send(event, context, cfnresponse.FAILED, responseData={"message": "Update methods failed"})
+            else:
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData={"message": "Update methods succeeded"})
+      Handler: index.lambda_handler
+      Role: !GetAtt MyLambdaExecutionRole.Arn
+      Runtime: python3.8
+      Timeout: 120
+  MyLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AccessAPIGateway
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - apigateway:PATCH
+                  - apigateway:GET
+                  - apigateway:POST
+                  - apigateway:DELETE
+                  - apigateway:CREATE_DEPLOYMENT
+                Resource: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${TestApplication.ApiGatewayId}/*"
+  LambdaAuthorizer:
+    Type: AWS::Lambda::Function
+    DependsOn: MyLambdaExecutionRole
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+
+          print('Loading function')
+
+
+          def lambda_handler(event, context):
+              #print("Received event: " + json.dumps(event, indent=2))
+              print("value1 = " + event['key1'])
+              print("value2 = " + event['key2'])
+              print("value3 = " + event['key3'])
+              return event['key1']  # Echo back the first key value
+              #raise Exception('Something went wrong')
+        
+      Handler: index.lambda_handler
+      Role: !GetAtt MyLambdaExecutionRole.Arn
+      Runtime: python3.7
+      Timeout: 20
+      FunctionName: !Sub ${AWS::StackName}-authorizer 
+
+  
