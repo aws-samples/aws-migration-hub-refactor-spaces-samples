@@ -4,7 +4,7 @@ This repository contains samples of [AWS Migration Hub Refactor Spaces](https://
 
 Refactor Spaces is the starting point for incremental application refactoring to microservices in AWS. Refactor Spaces helps reduce the undifferentiated heavy lifting of building and operating AWS infrastructure for incremental refactoring. 
 
-A Refactor Spaces environment provides the infrastructure, multi-account networking, and routing needed to incrementally modernize. Refactor Spaces environments include an application proxy that models the Strangler Fig pattern to let you transparently add new services to an external HTTPS endpoint and incrementally route traffic to the new services. Refactor Spaces bridges networking across AWS accounts to allow legacy and new services to communicate while maintaining the independence of separate AWS accounts.
+A Refactor Spaces environment provides the infrastructure, multi-account networking, and routing needed to incrementally modernize. Refactor Spaces environments include an application proxy that models the Strangler Fig pattern to let you transparently add new services to an external HTTPS endpoint and incrementally route traffic to the new services. Refactor Spaces optionally bridges networking across AWS accounts to allow legacy and new services to communicate while maintaining the independence of separate AWS accounts.
 
 You can use Refactor Spaces to:
 
