@@ -8,6 +8,7 @@ A simple TypeScript CDK example that creates a Refactor Spaces:
 [Refactor Spaces](https://console.aws.amazon.com/migrationhub/refactor-spaces/home#) accelerates incrementally refactoring applications (strangler-fig) to microservices on AWS.  
 
 ## Useful commands
+From the `cdk` directory:
 
 * `npm run build`   compile typescript to js
 * `npm run watch`   watch for changes and compile
