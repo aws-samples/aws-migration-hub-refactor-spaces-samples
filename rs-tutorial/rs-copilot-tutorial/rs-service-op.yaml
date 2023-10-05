@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  PostsUrl:
+    Type: String
+    Description: Specify the ALB URL for the posts service deployed through Copilot CLI
+    Default: ''
+  UsersUrl:
+    Type: String
+    Description: Specify the ALB URL for the users service deployed through Copilot CLI
+    Default: ''
+  ThreadsUrl:
+    Type: String
+    Description: Specify the ALB URL for the threads service deployed through Copilot CLI
+    Default: ''
+  EnvironmentId:
+    Type: String
+    Description: Specify the EnvironmentID from the output you saved earlier
+  ApplicationID:
+    Type: String
+    Description: Specify the ApplicationID from the output you saved earlier
+
+Conditions:
+  ShouldCreatePosts:
+    Fn::Not:
+      - Fn::Equals:
+        - !Ref PostsUrl
+        - ''
+  ShouldCreateUsers:
+    Fn::Not:
+      - Fn::Equals:
+        - !Ref UsersUrl
+        - ''
+  ShouldCreateThreads:
+    Fn::Not:
+      - Fn::Equals:
+        - !Ref ThreadsUrl
+        - ''
+Resources:
+
+  RefactorSpacesPostsService:
+    Condition: ShouldCreatePosts
+    Type: AWS::RefactorSpaces::Service
+    Properties:
+      Name: posts
+      EnvironmentIdentifier: !Ref EnvironmentId
+      ApplicationIdentifier: !Ref ApplicationID
+      EndpointType: URL
+      UrlEndpoint:
+        Url: !Ref PostsUrl
+
+  RefactorSpacesPostsRoute:
+    Condition: ShouldCreatePosts
+    Type: AWS::RefactorSpaces::Route
+    DependsOn: RefactorSpacesPostsService
+    Properties:
+      RouteType: URI_PATH
+      UriPathRoute:
+        ActivationState: ACTIVE
+        AppendSourcePath: true
+        IncludeChildPaths: true
+        SourcePath: /posts
+      ServiceIdentifier: !GetAtt RefactorSpacesPostsService.ServiceIdentifier
+      EnvironmentIdentifier: !Ref EnvironmentId
+      ApplicationIdentifier: !Ref ApplicationID
+  
+  RefactorSpacesUsersService:
+    Condition: ShouldCreateUsers
+    Type: AWS::RefactorSpaces::Service
+    Properties:
+      Name: users
+      EnvironmentIdentifier: !Ref EnvironmentId
+      ApplicationIdentifier: !Ref ApplicationID
+      EndpointType: URL
+      UrlEndpoint:
+        Url: !Ref UsersUrl
+
+  RefactorSpacesUsersRoute:
+    Condition: ShouldCreateUsers
+    Type: AWS::RefactorSpaces::Route
+    DependsOn: RefactorSpacesUsersService
+    Properties:
+      RouteType: URI_PATH
+      UriPathRoute:
+        ActivationState: ACTIVE
+        AppendSourcePath: true
+        IncludeChildPaths: true
+        SourcePath: /users
+      ServiceIdentifier: !GetAtt RefactorSpacesUsersService.ServiceIdentifier
+      EnvironmentIdentifier: !Ref EnvironmentId
+      ApplicationIdentifier: !Ref ApplicationID
+
+  RefactorSpacesThreadsService:
+    Condition: ShouldCreateThreads
+    Type: AWS::RefactorSpaces::Service
+    Properties:
+      Name: threads
+      EnvironmentIdentifier: !Ref EnvironmentId
+      ApplicationIdentifier: !Ref ApplicationID
+      EndpointType: URL
+      UrlEndpoint:
+        Url: !Ref ThreadsUrl
+
+  RefactorSpacesThreadsRoute:
+    Condition: ShouldCreateThreads
+    Type: AWS::RefactorSpaces::Route
+    DependsOn: RefactorSpacesThreadsService
+    Properties:
+      RouteType: URI_PATH
+      UriPathRoute:
+        ActivationState: ACTIVE
+        AppendSourcePath: true
+        IncludeChildPaths: true
+        SourcePath: /threads
+      ServiceIdentifier: !GetAtt RefactorSpacesThreadsService.ServiceIdentifier
+      EnvironmentIdentifier: !Ref EnvironmentId
+      ApplicationIdentifier: !Ref ApplicationID
+
+Outputs:
+
+  PostsServiceId:
+    Description: The ID of Refactor Spaces Monolith
+    #Value: !GetAtt RefactorSpacesPostsService.ServiceIdentifier Condition: ShouldCreatePosts
+    Value: !If [ShouldCreatePosts, !GetAtt RefactorSpacesPostsService.ServiceIdentifier, 'Posts service creation skipped']
+
+  UsersServiceId:
+    Description: The ID of Refactor Spaces Monolith
+    #Value: !GetAtt RefactorSpacesUsersService.ServiceIdentifier
+    Value: !If [ShouldCreateUsers, !GetAtt RefactorSpacesUsersService.ServiceIdentifier, 'Users service creation skipped']
+
+  ThreadsServiceId:
+    Description: The ID of Refactor Spaces Monolith
+    #Value: !GetAtt RefactorSpacesThreadsService.ServiceIdentifier 
+    Value: !If [ShouldCreateThreads, !GetAtt RefactorSpacesThreadsService.ServiceIdentifier, 'Threads service creation skipped']
