@@ -6,7 +6,7 @@ This template creates the refactor environment for the Refactor Spaces and Copil
 
 ### Create the refactor environment
 
-This template(**rs.yaml**) creates a Proxy VPC with 2 subnets, a Refactor Spaces environment and application, and a default service and route with Refactor Spaces.
+This template(**rs.yaml**) creates a proxy VPC with 2 subnets, a Refactor Spaces environment and application, and a default service and route with Refactor Spaces.
 
   
 
