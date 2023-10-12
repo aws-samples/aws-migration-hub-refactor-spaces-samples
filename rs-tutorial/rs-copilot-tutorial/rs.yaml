@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  MonolithUrl:
+    Type: String
+    Description: Specify the ALB URL for the Monolith deployed through Copilot CLI
+
+  VpcName:
+    Description: Name for the VPC
+    Type: String
+    Default: refactor-spaces-tutorial-vpc
+
+  VpcCIDR:
+    Description: CIDR block for the VPC
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicSubnet1CIDR:
+    Description: CIDR block for public subnet 1
+    Type: String
+    Default: 10.0.1.0/24
+
+  PublicSubnet2CIDR:
+    Description: CIDR block for public subnet 2
+    Type: String
+    Default: 10.0.2.0/24
+  
+  EnvironmentName:
+    Type: String
+    AllowedPattern: "^[A-Za-z0-9- ]+$"
+    Description: Name your Refactor Spaces environment.
+    Default: rs-tutorial-env
+
+  ApplicationName:
+    Type: String
+    AllowedPattern: "^[A-Za-z0-9- ]+$"
+    Description: Name your Refactor Spaces application.
+    Default: rs-tutorial-app
+
+  NetworkFabricType:
+    Type: String
+    AllowedValues:
+      - NONE
+      - TRANSIT_GATEWAY
+    Description: Select if you want Refactor Spaces to provision a network bridge (Transit Gateway) to establish cross account/VPC network connectivity.
+    Default: NONE
+
+  ProxyEndpointType:
+    Type: String
+    AllowedValues:
+      - REGIONAL
+      - PRIVATE
+    Description: Select if you want your API to be public (REGIONAL) or private (PRIVATE).
+    Default: REGIONAL
+
+  DefaultServiceName:
+    Type: String
+    Description: Enter the name for the Default Service
+    Default: Monolith
+
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      CidrBlock: !Ref VpcCIDR
+      Tags:
+        - Key: Name
+          Value: !Ref VpcName
+  PublicSubnetOne:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnet1CIDR
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+  PublicSubnetTwo:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnet2CIDR
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+  GatewayAttachement:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: GatewayAttachement
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  PublicSubnetOneRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnetOne
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnetTwoRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnetTwo
+      RouteTableId: !Ref PublicRouteTable
+      
+  RefactorSpacesEnvironment:
+    Type: AWS::RefactorSpaces::Environment
+    DependsOn: VPC
+    Properties:
+      Name: !Ref EnvironmentName
+      NetworkFabricType: !Ref NetworkFabricType
+      Description: A Refactor Spaces environment for the Break the Monolith tutorial
+
+  RefactorSpacesApplication:
+    Type: AWS::RefactorSpaces::Application
+    DependsOn: 
+    - PublicSubnetOne
+    - PublicSubnetTwo
+    Properties:
+      Name: !Ref ApplicationName
+      EnvironmentIdentifier: !Ref RefactorSpacesEnvironment
+      VpcId: !Ref VPC
+      ProxyType: API_GATEWAY
+      ApiGatewayProxy:
+        EndpointType: REGIONAL
+
+  RefactorSpacesDefaultService:
+    Type: AWS::RefactorSpaces::Service
+    Properties:
+      Name: !Ref DefaultServiceName
+      EnvironmentIdentifier: !Ref RefactorSpacesEnvironment
+      ApplicationIdentifier: !GetAtt RefactorSpacesApplication.ApplicationIdentifier
+      EndpointType: URL
+      VpcId: !Ref VPC
+      UrlEndpoint:
+        Url: !Ref MonolithUrl
+
+  RefactorSpacesDefaultRoute:
+    Type: AWS::RefactorSpaces::Route
+    Properties:
+      RouteType: DEFAULT
+      ServiceIdentifier: !GetAtt RefactorSpacesDefaultService.ServiceIdentifier
+      EnvironmentIdentifier: !Ref RefactorSpacesEnvironment
+      ApplicationIdentifier: !GetAtt RefactorSpacesApplication.ApplicationIdentifier
+
+Outputs:
+
+  VPCId:
+    Description: The ID of the VPC that this stack is deployed in
+    Value: !Ref VPC
+    Export:
+      Name: !Join 
+        - ':'
+        - - !Ref 'AWS::StackName'
+          - VPCId
+  envId:
+    Description: The ID of Refactor Spaces Env
+    Value: !Ref RefactorSpacesEnvironment
+  
+  appId:
+    Description: The ID of Refactor Spaces App
+    Value: !GetAtt RefactorSpacesApplication.ApplicationIdentifier
+
+  rsProxyURL:
+    Description: The API Gateway Proxy URL for the Refactor Spaces Application
+    Value: !GetAtt RefactorSpacesApplication.ProxyUrl
+
+  rsServiceId:
+    Description: The ID of Refactor Spaces Monolith
+    Value: !GetAtt RefactorSpacesDefaultService.ServiceIdentifier

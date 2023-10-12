@@ -31,6 +31,7 @@ These templates demonstrate how to use parameters to enable you to input custom 
 
 These templates demonstrate how to create and associate an AWS WAF Web ACL with the API Gateway API created by Refactor Spaces.
 
+## rs-tutorial
 
-
+These templates are for the Refactor Spaces tutorials. 
 
