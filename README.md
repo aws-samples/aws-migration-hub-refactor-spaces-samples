@@ -1,6 +1,6 @@
 # AWS Migration Hub Refactor Spaces - Sample CloudFormation Templates
 
-This repository contains samples of [AWS Migration Hub Refactor Spaces](https://docs.aws.amazon.com/migrationhub-refactor-spaces/latest/userguide/what-is-mhub-refactor-spaces.html) CloudFormation templates.  These templates demonstrate how to create Refactor Spaces environments, applications, services, and routes.  They also show how to customize the API Gateway API orchestrated by Refactor Spaces (enabling CloudWatch logging, using WAF to protect the API, etc.)
+This repository contains samples of [AWS Migration Hub Refactor Spaces](https://docs.aws.amazon.com/migrationhub-refactor-spaces/latest/userguide/what-is-mhub-refactor-spaces.html) CloudFormation templates and a basic CDK example.  These templates demonstrate how to create Refactor Spaces environments, applications, services, and routes.  They also show how to customize the API Gateway API orchestrated by Refactor Spaces (enabling CloudWatch logging, using WAF to protect the API, etc.)
 
 Refactor Spaces is the starting point for incremental application refactoring to microservices in AWS. Refactor Spaces helps reduce the undifferentiated heavy lifting of building and operating AWS infrastructure for incremental refactoring. 
 
@@ -34,4 +34,7 @@ These templates demonstrate how to create and associate an AWS WAF Web ACL with 
 ## rs-tutorial
 
 These templates are for the Refactor Spaces tutorials. 
+
+## rs-cdk-example
+Example CDK project for creating Refactor Spaces resources. Referenced in the DZone article [Get Started Modernizing to Microservices with Strangler-Fig on AWS](https://dzone.com/articles/get-started-modernizing-to-microservices-with-strangler-fig-on-aws/).
 
